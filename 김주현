@@ -1,0 +1,195 @@
+from pico2d import *
+
+class StateMachine:
+    def __init__(self, owner):
+        self.owner = owner
+        self.current_state = None
+        self.transitions = {}
+
+    def start(self, initial_state):
+        self.current_state = initial_state
+        self.current_state.enter(self.owner)
+
+    def set_transitions(self, transitions):
+        self.transitions = transitions
+
+    def change_state(self, new_state):
+        if self.current_state:
+            self.current_state.exit(self.owner)
+        self.current_state = new_state
+        self.current_state.enter(self.owner)
+
+    def update(self):
+        if self.current_state:
+            self.current_state.do(self.owner)
+
+    def handle_event(self, event):
+        for condition, new_state in self.transitions.get(self.current_state, {}).items():
+            if condition(event):
+                self.change_state(new_state)
+                break
+
+class Grass:
+    def __init__(self):
+        self.image = load_image('grass.png')
+
+    def draw(self):
+        self.image.draw(400, 30)
+
+    def update(self):
+        pass
+
+class Idle:
+    @staticmethod
+    def enter(boy):
+        boy.frame = 0
+        boy.dir = 0
+
+    @staticmethod
+    def exit(boy):
+        pass
+
+    @staticmethod
+    def do(boy):
+        boy.frame = (boy.frame + 1) % 8
+
+    @staticmethod
+    def draw(boy):
+        boy.image.clip_draw(boy.frame * 100, 300, 100, 100, boy.x, boy.y)
+
+class AutoRun:
+    @staticmethod
+    def enter(boy):
+        boy.frame = 0
+        boy.dir = -1
+        boy.speed = 5
+        boy.size = 1.5
+        boy.start_time = get_time()  # 상태에 들어갈 때 현재 시간을 기록합니다.
+
+    @staticmethod
+    def exit(boy):
+        pass
+
+    @staticmethod
+    def do(boy):
+        boy.frame = (boy.frame + 1) % 8
+        boy.x += boy.dir * boy.speed
+        # 왼쪽 화면 끝에서 방향 전환
+        if boy.x < 0:
+            boy.dir = 1
+        elif boy.x > 800:
+            boy.dir = -1
+        # 5초가 경과하면 Idle 상태로 전환
+        if get_time() - boy.start_time >= 5:  # 시간을 확인해서 5초가 지나면 상태 전환
+            boy.state_machine.change_state(Idle)
+
+    @staticmethod
+    def draw(boy):
+        boy.image.clip_draw(boy.frame * 100, 300, int(100 * boy.size), int(100 * boy.size), boy.x, boy.y)
+
+class Run:
+    @staticmethod
+    def enter(boy):
+        boy.frame = 0
+
+    @staticmethod
+    def exit(boy):
+        pass
+
+    @staticmethod
+    def do(boy):
+        boy.frame = (boy.frame + 1) % 8
+        boy.x += boy.dir * 5
+
+    @staticmethod
+    def draw(boy):
+        if boy.dir == 1:
+            boy.image.clip_draw(boy.frame * 100, 200, 100, 100, boy.x, boy.y)
+        elif boy.dir == -1:
+            boy.image.clip_draw(boy.frame * 100, 100, 100, 100, boy.x, boy.y)
+
+class Boy:
+    def __init__(self):
+        self.image = load_image('animation_sheet.png')
+        self.state_machine = StateMachine(self)
+        self.state_machine.start(Idle)
+        self.state_machine.set_transitions(
+            {
+                Idle: {
+                    lambda e: e.type == SDL_KEYDOWN and e.key == SDLK_a: AutoRun,
+                    lambda e: e.type == SDL_KEYDOWN and e.key == SDLK_RIGHT: Run,
+                    lambda e: e.type == SDL_KEYDOWN and e.key == SDLK_LEFT: Run
+                },
+                AutoRun: {
+                    lambda e: e.type == SDL_KEYDOWN and e.key in (SDLK_LEFT, SDLK_RIGHT): Run,
+                    lambda e: e.type == SDL_KEYUP and e.key == SDLK_a: Idle  # 'a' 키를 놓으면 Idle로 전환
+                },
+                Run: {
+                    lambda e: e.type == SDL_KEYUP and (e.key == SDLK_RIGHT or e.key == SDLK_LEFT): Idle,
+                    lambda e: e.type == SDL_KEYDOWN and e.key == SDLK_a: AutoRun
+                }
+            }
+        )
+        self.x, self.y = 400, 90
+        self.dir = 0
+        self.frame = 0
+        self.size = 1.0
+        self.speed = 1
+
+    def update(self):
+        self.state_machine.update()
+
+    def draw(self):
+        self.state_machine.current_state.draw(self)
+
+    def handle_event(self, event):
+        if event.type == SDL_KEYDOWN:
+            if event.key == SDLK_RIGHT:
+                self.dir = 1
+            elif event.key == SDLK_LEFT:
+                self.dir = -1
+        elif event.type == SDL_KEYUP:
+            if event.key in (SDLK_RIGHT, SDLK_LEFT):
+                self.dir = 0
+        self.state_machine.handle_event(event)
+
+def handle_events():
+    global running
+    events = get_events()
+    for event in events:
+        if event.type == SDL_QUIT:
+            running = False
+        elif event.type == SDL_KEYDOWN and event.key == SDLK_ESCAPE:
+            running = False
+        else:
+            boy.handle_event(event)
+
+def reset_world():
+    global running
+    global grass
+    global boy
+
+    running = True
+    grass = Grass()
+    boy = Boy()
+
+def update_world():
+    boy.update()
+
+def render_world():
+    clear_canvas()
+    grass.draw()
+    boy.draw()
+    update_canvas()
+
+open_canvas()
+reset_world()
+
+# 게임 루프
+while running:
+    handle_events()
+    update_world()
+    render_world()
+    delay(0.01)
+
+close_canvas()
